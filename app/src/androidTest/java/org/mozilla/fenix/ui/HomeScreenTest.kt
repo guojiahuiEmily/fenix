@@ -16,6 +16,7 @@ import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.helpers.AndroidAssetDispatcher
+import org.mozilla.fenix.helpers.Constants.POCKET_RECOMMENDED_STORIES_UTM_PARAM
 import org.mozilla.fenix.helpers.HomeActivityTestRule
 import org.mozilla.fenix.helpers.RetryTestRule
 import org.mozilla.fenix.helpers.TestAssetHelper
@@ -85,7 +86,7 @@ class HomeScreenTest {
             verifyDefaultSearchEngine("Google")
             verifyHomeMenuButton()
             verifyTabButton()
-            verifyNoTabsOpened()
+            verifyTabCounter("0")
         }
     }
 
@@ -158,81 +159,6 @@ class HomeScreenTest {
     }
 
     @Test
-    fun dismissOnboardingUsingSettingsTest() {
-        homeScreen {
-            verifyWelcomeHeader()
-        }.openThreeDotMenu {
-        }.openSettings {
-            verifyGeneralHeading()
-        }.goBack {
-            verifyExistingTopSitesList()
-        }
-    }
-
-    @Test
-    fun dismissOnboardingUsingBookmarksTest() {
-        homeScreen {
-            verifyWelcomeHeader()
-        }.openThreeDotMenu {
-        }.openBookmarks {
-            verifyBookmarksMenuView()
-            navigateUp()
-        }
-        homeScreen {
-            verifyExistingTopSitesList()
-        }
-    }
-
-    @Test
-    fun dismissOnboardingUsingHelpTest() {
-        activityTestRule.activityRule.applySettingsExceptions {
-            it.isJumpBackInCFREnabled = false
-            it.isWallpaperOnboardingEnabled = false
-        }
-
-        homeScreen {
-            verifyWelcomeHeader()
-        }.openThreeDotMenu {
-        }.openHelp {
-            verifyHelpUrl()
-        }.goBack {
-            verifyExistingTopSitesList()
-        }
-    }
-
-    @Test
-    fun dismissOnboardingWithPageLoadTest() {
-        activityTestRule.activityRule.applySettingsExceptions {
-            it.isJumpBackInCFREnabled = false
-            it.isWallpaperOnboardingEnabled = false
-        }
-
-        val defaultWebPage = TestAssetHelper.getGenericAsset(mockWebServer, 1)
-
-        homeScreen {
-            verifyWelcomeHeader()
-        }
-        navigationToolbar {
-        }.enterURLAndEnterToBrowser(defaultWebPage.url) {
-        }.goToHomescreen {
-            verifyExistingTopSitesList()
-        }
-    }
-
-    @Test
-    fun toolbarTapDoesntDismissOnboardingTest() {
-        homeScreen {
-            verifyWelcomeHeader()
-        }.openSearch {
-            verifyScanButton()
-            verifySearchEngineButton()
-            verifyKeyboardVisibility()
-        }.dismissSearchBar {
-            verifyWelcomeHeader()
-        }
-    }
-
-    @Test
     fun verifyPocketHomepageStoriesTest() {
         activityTestRule.activityRule.applySettingsExceptions {
             it.isRecentTabsFeatureEnabled = false
@@ -259,7 +185,6 @@ class HomeScreenTest {
         }
     }
 
-    @Ignore("Failed, see: https://github.com/mozilla-mobile/fenix/issues/28069")
     @Test
     fun openPocketStoryItemTest() {
         activityTestRule.activityRule.applySettingsExceptions {
@@ -275,7 +200,7 @@ class HomeScreenTest {
             scrollToPocketProvokingStories()
             firstPocketStoryPublisher = getProvokingStoryPublisher(1)
         }.clickPocketStoryItem(firstPocketStoryPublisher, 1) {
-            verifyUrl(firstPocketStoryPublisher)
+            verifyUrl(POCKET_RECOMMENDED_STORIES_UTM_PARAM)
         }
     }
 

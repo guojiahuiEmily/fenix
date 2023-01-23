@@ -11,11 +11,18 @@ import android.view.ViewGroup
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.lifecycle.Observer
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import com.google.android.material.snackbar.Snackbar
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import mozilla.components.browser.state.selector.findCustomTabOrSelectedTab
 import mozilla.components.browser.state.selector.findTab
 import mozilla.components.browser.state.state.SessionState
 import mozilla.components.browser.state.state.TabSessionState
+import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.browser.thumbnails.BrowserThumbnails
 import mozilla.components.browser.toolbar.BrowserToolbar
 import mozilla.components.concept.engine.permission.SitePermissions
@@ -24,9 +31,11 @@ import mozilla.components.feature.contextmenu.ContextMenuCandidate
 import mozilla.components.feature.readerview.ReaderViewFeature
 import mozilla.components.feature.tab.collections.TabCollection
 import mozilla.components.feature.tabs.WindowFeature
+import mozilla.components.lib.state.ext.consumeFlow
 import mozilla.components.service.glean.private.NoExtras
 import mozilla.components.support.base.feature.UserInteractionHandler
 import mozilla.components.support.base.feature.ViewBoundFeatureWrapper
+import mozilla.components.support.ktx.kotlinx.coroutines.flow.ifAnyChanged
 import org.mozilla.fenix.GleanMetrics.ReaderMode
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.FenixSnackbar
@@ -38,6 +47,8 @@ import org.mozilla.fenix.ext.nav
 import org.mozilla.fenix.ext.requireComponents
 import org.mozilla.fenix.ext.runIfFragmentIsAttached
 import org.mozilla.fenix.ext.settings
+import org.mozilla.fenix.nimbus.FxNimbus
+import org.mozilla.fenix.settings.quicksettings.protections.cookiebanners.dialog.CookieBannerReEngagementDialogUtils
 import org.mozilla.fenix.shortcut.PwaOnboardingObserver
 import org.mozilla.fenix.theme.ThemeManager
 
@@ -167,6 +178,9 @@ class BrowserFragment : BaseBrowserFragment(), UserInteractionHandler {
                 owner = this,
                 view = view,
             )
+        }
+        if (!context.settings().shouldUseCookieBanner && !context.settings().userOptOutOfReEngageCookieBannerDialog) {
+            observeCookieBannerHandlingState(context.components.core.store)
         }
     }
 
@@ -360,22 +374,40 @@ class BrowserFragment : BaseBrowserFragment(), UserInteractionHandler {
     }
 
     override fun navToQuickSettingsSheet(tab: SessionState, sitePermissions: SitePermissions?) {
-        requireComponents.useCases.trackingProtectionUseCases.containsException(tab.id) { contains ->
-            runIfFragmentIsAttached {
-                val isTrackingProtectionEnabled = tab.trackingProtection.enabled && !contains
-                val directions =
-                    BrowserFragmentDirections.actionBrowserFragmentToQuickSettingsSheetDialogFragment(
-                        sessionId = tab.id,
-                        url = tab.content.url,
-                        title = tab.content.title,
-                        isSecured = tab.content.securityInfo.secure,
-                        sitePermissions = sitePermissions,
-                        gravity = getAppropriateLayoutGravity(),
-                        certificateName = tab.content.securityInfo.issuer,
-                        permissionHighlights = tab.content.permissionHighlights,
-                        isTrackingProtectionEnabled = isTrackingProtectionEnabled,
-                    )
-                nav(R.id.browserFragment, directions)
+        val useCase = requireComponents.useCases.trackingProtectionUseCases
+        FxNimbus.features.cookieBanners.recordExposure()
+        useCase.containsException(tab.id) { hasTrackingProtectionException ->
+            lifecycleScope.launch(Dispatchers.Main) {
+                val cookieBannersStorage = requireComponents.core.cookieBannersStorage
+                val hasCookieBannerException =
+                    if (requireContext().settings().shouldUseCookieBanner) {
+                        withContext(Dispatchers.IO) {
+                            cookieBannersStorage.hasException(
+                                tab.content.url,
+                                tab.content.private,
+                            )
+                        }
+                    } else {
+                        false
+                    }
+                runIfFragmentIsAttached {
+                    val isTrackingProtectionEnabled =
+                        tab.trackingProtection.enabled && !hasTrackingProtectionException
+                    val directions =
+                        BrowserFragmentDirections.actionBrowserFragmentToQuickSettingsSheetDialogFragment(
+                            sessionId = tab.id,
+                            url = tab.content.url,
+                            title = tab.content.title,
+                            isSecured = tab.content.securityInfo.secure,
+                            sitePermissions = sitePermissions,
+                            gravity = getAppropriateLayoutGravity(),
+                            certificateName = tab.content.securityInfo.issuer,
+                            permissionHighlights = tab.content.permissionHighlights,
+                            isTrackingProtectionEnabled = isTrackingProtectionEnabled,
+                            isCookieHandlingEnabled = !hasCookieBannerException,
+                        )
+                    nav(R.id.browserFragment, directions)
+                }
             }
         }
     }
@@ -457,5 +489,23 @@ class BrowserFragment : BaseBrowserFragment(), UserInteractionHandler {
     @VisibleForTesting
     internal fun updateLastBrowseActivity() {
         requireContext().settings().lastBrowseActivity = System.currentTimeMillis()
+    }
+
+    private fun observeCookieBannerHandlingState(store: BrowserStore) {
+        consumeFlow(store) { flow ->
+            flow.mapNotNull { state ->
+                state.findCustomTabOrSelectedTab(customTabSessionId)
+            }.ifAnyChanged { tab ->
+                arrayOf(
+                    tab.cookieBanner,
+                )
+            }.collect {
+                CookieBannerReEngagementDialogUtils.tryToShowReEngagementDialog(
+                    settings = requireContext().settings(),
+                    status = it.cookieBanner,
+                    navController = findNavController(),
+                )
+            }
+        }
     }
 }

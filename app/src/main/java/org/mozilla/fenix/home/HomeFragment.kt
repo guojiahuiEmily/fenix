@@ -361,7 +361,7 @@ class HomeFragment : Fragment() {
                 }
 
                 UnifiedSearch.searchMenuTapped.record(NoExtras())
-                searchSelectorMenu.menuController.show(anchor = it, orientation = orientation, forceOrientation = true)
+                searchSelectorMenu.menuController.show(anchor = it, orientation = orientation)
             }
         }
 
@@ -417,7 +417,6 @@ class HomeFragment : Fragment() {
             pocketStoriesController = DefaultPocketStoriesController(
                 homeActivity = activity,
                 appStore = components.appStore,
-                navController = findNavController(),
             ),
         )
 
